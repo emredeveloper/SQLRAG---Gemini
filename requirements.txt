@@ -1,0 +1,7 @@
+streamlit
+pathlib
+langchain-google-genai
+langchain
+sqlalchemy
+pandas
+sqlite3

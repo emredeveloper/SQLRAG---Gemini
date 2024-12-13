@@ -4,12 +4,12 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_sql_agent
 from langchain.sql_database import SQLDatabase
 from langchain.agents.agent_types import AgentType
-from langchain.callbacks import StreamlitCallbackHandler
 from langchain.agents.agent_toolkits import SQLDatabaseToolkit
 from sqlalchemy import create_engine, inspect
 import pandas as pd
 import sqlite3
 import os
+import re
 
 st.set_page_config(page_title="LangChain: Chat with SQL DB", page_icon="🦜")
 st.title("🦜 LangChain: Chat with SQL DB")
@@ -25,9 +25,9 @@ INJECTION_WARNING = """
 LOCALDB = "USE_LOCALDB"
 
 # --- 2. User Inputs with Database Preview ---
-
 radio_opt = ["Use sample database - Chinook.db", "Connect to your SQL database"]
 selected_opt = st.sidebar.radio(label="Choose suitable option", options=radio_opt)
+
 if radio_opt.index(selected_opt) == 1:
     st.sidebar.warning(INJECTION_WARNING, icon="⚠️")
     st.sidebar.markdown("---")
@@ -47,7 +47,7 @@ google_api_key = st.sidebar.text_input(
 llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0, streaming=True)
 
 # Check user inputs and provide database preview
-if not db_uri:
+if not db_uri and selected_opt == "Connect to your SQL database":
     st.info("Please enter database URI to connect to your database.")
     st.stop()
 
@@ -66,6 +66,10 @@ def configure_db(db_uri):
             creator = lambda: sqlite3.connect(f"file:{db_filepath}?mode=ro", uri=True)
             engine = create_engine("sqlite:///", creator=creator)
         else:
+            # Validate the database URI format
+            if not re.match(r'^[a-zA-Z]+://', db_uri):
+                st.error("Invalid database URI format. Please ensure it starts with a valid scheme (e.g., mysql://, postgresql://).")
+                st.stop()
             engine = create_engine(db_uri)
             
         with engine.connect() as connection:
@@ -93,9 +97,12 @@ If your query involves accessing data, I'll use SQL queries to retrieve the info
 If I cannot answer your question or if it's beyond the scope of the database, I'll let you know.
 You can also request to view the database structure or ask for examples of queries.
 
-For instance, you can ask me to create a new SQL table, modify existing tables, or retrieve specific information from the database."""
-
-
+For instance, you can ask me to create a new SQL table, modify existing tables, or retrieve specific information from the database.
+Here are some example queries you can try:
+- "Show me all customers."
+- "What is the total sales amount?"
+- "List all albums in the database."
+"""
 
 # --- 5. Create SQL Agent ---
 toolkit = SQLDatabaseToolkit(db=db, llm=llm)
@@ -107,7 +114,6 @@ agent = create_sql_agent(
 )
 
 # --- 6. Chat Interface with Improved Formatting and Feedback ---
-
 if "messages" not in st.session_state or st.sidebar.button("Clear message history"):
     st.session_state["messages"] = [
         {"role": "system", "content": DEFAULT_SYSTEM_MESSAGE},
@@ -127,17 +133,19 @@ if st.button("Send"):
         st.session_state.messages.append({"role": "user", "content": user_query})
         st.text("You: " + user_query)
 
-    with st.spinner("Thinking..."):
-        response = agent.run(user_query)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        with st.spinner("Thinking..."):
+            response = agent.run(user_query)
+            st.session_state.messages.append({"role": "assistant", "content": response})
 
-        if isinstance(response, pd.DataFrame):
-            st.subheader("Query Result:")
-            st.table(response)  # Display as DataFrame if applicable
-        else:
-            st.info(response)
+            if isinstance(response, pd.DataFrame):
+                st.subheader("Query Result:")
+                st.table(response)  # Display as DataFrame if applicable
+            else:
+                st.info(response)
+    else:
+        st.warning("Please enter a query before sending.")
 
-# Buton ile tablo halinde gösterme seçeneği
+# Button to toggle table view
 if "tabulate_output" not in st.session_state:
     st.session_state["tabulate_output"] = False
 
